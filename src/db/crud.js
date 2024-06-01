@@ -1,35 +1,57 @@
-const {desc, eq} = require('drizzle-orm')
-const clients = require('./clients')
 
-const schemas = require('./schemas')
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
 
-async function newLead({email}) {
-    const db = await clients.getDrizzleDbClient()
-    const result = await db.insert(schemas.LeadTable).values({
-        email:email
-    }).returning()
-    if (result.length === 1) {
-        return result[0]
+const app = express();
+app.use(bodyParser.json());
+app.use(cors());
+
+let sessions = {};
+
+app.post('/control', (req, res) => {
+    const { action, value, sessionId } = req.body;
+
+    if (!sessions[sessionId]) {
+        sessions[sessionId] = { url: '', status: 'stop', volume: 100, action: null, value: null };
     }
-    return result
-}
 
-async function listLeads() {
-    const db = await clients.getDrizzleDbClient()
-    const results = await db.select().from(schemas.LeadTable).orderBy(desc(schemas.LeadTable.createdAt)).limit(10)
-    return results
-}
+    sessions[sessionId].action = action;
+    sessions[sessionId].value = value;
 
+    res.json({ status: 'Command received', action, value, sessionId });
+});
 
-async function getLead(id) {
-    const db = await clients.getDrizzleDbClient()
-    const result = await db.select().from(schemas.LeadTable).where(eq(schemas.LeadTable.id, id))
-    if (result.length === 1) {
-        return result[0]
+app.post('/update-url', (req, res) => {
+    const { url, sessionId } = req.body;
+
+    if (!sessions[sessionId]) {
+        sessions[sessionId] = { url: '', status: 'stop', volume: 100, action: null, value: null };
     }
-    return null
-}
 
-module.exports.newLead = newLead
-module.exports.listLeads = listLeads
-module.exports.getLead = getLead
+    sessions[sessionId].url = url;
+    res.json({ status: 'URL updated', sessionId });
+});
+
+app.get('/current-url/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
+
+    if (!sessions[sessionId]) {
+        return res.status(400).json({ error: 'Invalid session ID' });
+    }
+
+    res.json({
+        success: true,
+        sessionId,
+        url: sessions[sessionId].url,
+        status: sessions[sessionId].status,
+        volume: sessions[sessionId].volume,
+        action: sessions[sessionId].action,
+        value: sessions[sessionId].value
+    });
+});
+
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+});
