@@ -1,71 +1,56 @@
-const serverless = require("serverless-http");
-const express = require("express");
-const crud = require('./db/crud')
-const validators = require('./db/validators')
-const {getDbClient} = require('./db/clients')
+const express = require('express');
+const bodyParser = require('body-parser');
+const cors = require('cors');
+
 const app = express();
-const STAGE = process.env.STAGE || 'prod'
-app.use(express.json())
+app.use(bodyParser.json());
+app.use(cors());
 
+let sessions = {};
 
-app.get("/", async (req, res, next) => {
-  console.log(process.env.DEBUG )
-  const sql = await getDbClient()
-  const now = Date.now()
-  const [dbNowResult] = await sql`select now();`
-  const delta = (dbNowResult.now.getTime() - now) / 1000
-  return res.status(200).json({
-    delta: delta,
-    stage: STAGE
-  });
+app.post('/control', (req, res) => {
+    const { action, value, sessionId } = req.body;
+
+    if (!sessions[sessionId]) {
+        sessions[sessionId] = { url: '', status: 'stop', volume: 100, action: null, value: null };
+    }
+
+    sessions[sessionId].action = action;
+    sessions[sessionId].value = value;
+
+    res.json({ status: 'Command received', action, value, sessionId });
 });
 
-app.get("/path", (req, res, next) => {
-  return res.status(200).json({
-    message: "Hello from path!",
-  });
+app.post('/update-url', (req, res) => {
+    const { url, sessionId } = req.body;
+
+    if (!sessions[sessionId]) {
+        sessions[sessionId] = { url: '', status: 'stop', volume: 100, action: null, value: null };
+    }
+
+    sessions[sessionId].url = url;
+    res.json({ status: 'URL updated', sessionId });
 });
 
+app.get('/current-url/:sessionId', (req, res) => {
+    const { sessionId } = req.params;
 
-app.get("/api/leads", async (req, res, next) => {
-  const results = await crud.listLeads()
-  return res.status(200).json({
-    results: results,
-  });
-});
+    if (!sessions[sessionId]) {
+        return res.status(400).json({ error: 'Invalid session ID' });
+    }
 
-app.post("/api/leads", async (req, res, next) => {
-  // POST -> create data
-  const postData = await req.body
-  // validation???
-  const {data, hasError, message} = await validators.validateLead(postData)
-  if (hasError === true) {
-    return res.status(400).json({
-      message: message ? message : "Invalid request. please try again",
+    res.json({
+        success: true,
+        sessionId,
+        url: sessions[sessionId].url,
+        status: sessions[sessionId].status,
+        volume: sessions[sessionId].volume,
+        action: sessions[sessionId].action,
+        value: sessions[sessionId].value
     });
-  } else if (hasError === undefined) {
-    return res.status(500).json({
-      message: "Server Error",
-    });
-  }
-
-  const result = await crud.newLead(data)
-  // insert data to the database
-  return res.status(201).json({
-    results: result,
-  });
 });
 
-app.use((req, res, next) => {
-  return res.status(404).json({
-    error: "Not Found",
-  });
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
 });
-
-// server-full app
-// app.listen(3000, ()=>{
-// console.log("running at http://localhost:3000")
-// })
-
-module.exports.app = app
-module.exports.handler = serverless(app);
